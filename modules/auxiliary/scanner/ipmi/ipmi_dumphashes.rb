@@ -1,14 +1,11 @@
 ##
-# This module requires Metasploit: http://metasploit.com/download
+# This module requires Metasploit: https://metasploit.com/download
 # Current source: https://github.com/rapid7/metasploit-framework
 ##
 
-
-require 'msf/core'
 require 'rex/proto/ipmi'
 
 class MetasploitModule < Msf::Auxiliary
-
   include Msf::Auxiliary::Report
   include Msf::Auxiliary::Scanner
 
@@ -26,7 +23,7 @@ class MetasploitModule < Msf::Auxiliary
       'References'  =>
         [
           ['URL', 'http://fish2.com/ipmi/remote-pw-cracking.html'],
-          ['URL', 'http://seclists.org/bugtraq/2014/Apr/16'], # HP's SSRT101367
+          ['URL', 'https://seclists.org/bugtraq/2014/Apr/16'], # HP's SSRT101367
           ['CVE', '2013-4786'],
           ['OSVDB', '95057'],
           ['BID', '61076'],
@@ -46,8 +43,16 @@ class MetasploitModule < Msf::Auxiliary
       OptString.new('OUTPUT_HASHCAT_FILE', [false, "Save captured password hashes in hashcat format"]),
       OptString.new('OUTPUT_JOHN_FILE', [false, "Save captured password hashes in john the ripper format"]),
       OptBool.new('CRACK_COMMON', [true, "Automatically crack common passwords as they are obtained", true])
-    ], self.class)
+    ])
 
+  end
+
+  def post_auth?
+    true
+  end
+
+  def default_cred?
+    true
   end
 
   def ipmi_status(msg)
@@ -59,7 +64,7 @@ class MetasploitModule < Msf::Auxiliary
   end
 
   def ipmi_good(msg)
-    vprint_good("#{rhost}:#{rport} - IPMI - #{msg}")
+    print_good("#{rhost}:#{rport} - IPMI - #{msg}")
   end
 
   def run_host(ip)

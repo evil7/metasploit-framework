@@ -30,7 +30,7 @@ module Metasploit
 
         CAN_GET_SESSION      = true
         DEFAULT_REALM        = 'WORKSTATION'
-        LIKELY_PORTS         = [ 139, 445 ]
+        LIKELY_PORTS         = [ 445 ]
         LIKELY_SERVICE_NAMES = [ "smb" ]
         PRIVATE_TYPES        = [ :password, :ntlm_hash ]
         REALM_KEY            = Metasploit::Model::Realm::Key::ACTIVE_DIRECTORY_DOMAIN
@@ -94,42 +94,48 @@ module Metasploit
 
           begin
 
-            realm       = credential.realm || ""
-            client      = RubySMB::Client.new(self.dispatcher, username: credential.public, password: credential.private, domain: realm)
+            realm       = credential.realm   || ""
+            username    = credential.public  || ""
+            password    = credential.private || ""
+            client      = RubySMB::Client.new(self.dispatcher, username: username, password: password, domain: realm)
             status_code = client.login
 
-            # Windows SMB will return an error code during Session
-            # Setup, but nix Samba requires a Tree Connect. Try admin$
-            # first, since that will tell us if this user has local
-            # admin access. Fall back to IPC$ which should be accessible
-            # to any user with valid creds.
-            begin
-              tree = client.tree_connect("\\\\#{host}\\admin$")
-              # Check to make sure we can write a file to this dir
-              if tree.permissions.add_file == 1
-                access_level = AccessLevels::ADMINISTRATOR
+            if status_code == WindowsError::NTStatus::STATUS_SUCCESS
+              # Windows SMB will return an error code during Session
+              # Setup, but nix Samba requires a Tree Connect. Try admin$
+              # first, since that will tell us if this user has local
+              # admin access. Fall back to IPC$ which should be accessible
+              # to any user with valid creds.
+              begin
+                tree = client.tree_connect("\\\\#{host}\\admin$")
+                # Check to make sure we can write a file to this dir
+                if tree.permissions.add_file == 1
+                  access_level = AccessLevels::ADMINISTRATOR
+                end
+              rescue Exception => e
+                client.tree_connect("\\\\#{host}\\IPC$")
               end
-            rescue Exception => e
-              client.tree_connect("\\\\#{host}\\IPC$")
             end
 
             case status_code.name
-              when *StatusCodes::CORRECT_CREDENTIAL_STATUS_CODES
-                status = Metasploit::Model::Login::Status::DENIED_ACCESS
-              when 'STATUS_SUCCESS'
+              when 'STATUS_SUCCESS', 'STATUS_PASSWORD_MUST_CHANGE', 'STATUS_PASSWORD_EXPIRED'
                 status = Metasploit::Model::Login::Status::SUCCESSFUL
               when 'STATUS_ACCOUNT_LOCKED_OUT'
                 status = Metasploit::Model::Login::Status::LOCKED_OUT
               when 'STATUS_LOGON_FAILURE', 'STATUS_ACCESS_DENIED'
                 status = Metasploit::Model::Login::Status::INCORRECT
+              when *StatusCodes::CORRECT_CREDENTIAL_STATUS_CODES
+                status = Metasploit::Model::Login::Status::DENIED_ACCESS
               else
                 status = Metasploit::Model::Login::Status::INCORRECT
             end
-          rescue ::Rex::ConnectionError => e
+          rescue ::Rex::ConnectionError, Errno::EINVAL, RubySMB::Error::NetBiosSessionService => e
             status = Metasploit::Model::Login::Status::UNABLE_TO_CONNECT
             proof = e
           rescue RubySMB::Error::UnexpectedStatusCode => e
             status = Metasploit::Model::Login::Status::INCORRECT
+          ensure
+            client.disconnect!
           end
 
           if status == Metasploit::Model::Login::Status::SUCCESSFUL && credential.public.empty?

